@@ -4,9 +4,10 @@
 
 Current handoff: Dell XPS 13 9310 2-in-1, BIOS **2.36.0**, Ubuntu kernel **7.0**.
 Physical ten-second closures have left ACPI `_LID`, raw `SW_LID`, and logind stuck
-open, including **before the first suspend in a fresh Ubuntu boot**. The next
-comparison is the existing Windows installation, without changing firmware or
-power policy. This document adds the Windows collector referenced in
+open, including **before the first suspend in a fresh Ubuntu boot**. The initial
+comparison used the existing Windows installation with unchanged settings; a
+subsequent explicitly approved LidSwitch change and successful retest are recorded
+below. This document adds the Windows collector referenced in
 [REBOOT_TEST_PLAN.md](REBOOT_TEST_PLAN.md); it does not change that plan's history.
 
 `windows_lid_capture.ps1` uses Windows PowerShell 5.1 and Windows built-ins. It
@@ -21,11 +22,53 @@ This is not direct Win32 lid-notification instrumentation and does not automatic
 classify the lid as working or broken. It also does not measure overnight drain or
 prove sustained S0ix residency.
 
-**Validation status:** prepared and inspected on Linux, where `pwsh` was not
-available. No PowerShell parser/runtime validation or Windows hardware test has
-been performed. First-run Windows compatibility and behavior remain unverified.
+**Current Windows preflight (2026-09-26):** the supplied BIOS photos confirm
+2.36.0, C-State Control ON, SpeedStep ON, and firmware Fastboot Minimal. They do
+not show Lid Switch, Block Sleep, or wake settings. A subsequent read-only Dell
+BIOS WMI query found **LidSwitch Disabled**, separately from PowerOnLidOpen
+Disabled; BlockSleep is Disabled. The user subsequently approved enabling only
+LidSwitch, and that change and the Windows retest are now complete.
+Windows 11 Pro build 26200
+advertises S0 Low Power Idle (Network Connected), with both AC and DC lid-close
+actions set to Sleep. Preflight is on AC at 100% battery. See
+[FINDINGS.md](FINDINGS.md) for the photo inventory and boot context. The current
+LidSwitch value is Enabled; retain the successful change for the Ubuntu follow-up.
+
+**Validation status:** Windows PowerShell 5.1.26100.7920 parser validation and
+14 isolated checks pass: eight command-runner cases (success, nonzero exit,
+timeout, skipped deadline, present/empty/missing/partial reports) and six
+legacy-report fallback cases. Run the collector
+outside the agent terminal sandbox; that sandbox caused a duplicate Path/PATH
+environment launch error in isolated tests. No environment workaround or system
+change was applied. Physical lid recognition was subsequently verified in the
+approved post-change retest recorded below.
+
+**First run:** the September 26 recording completed at 09:21:24 UTC. AC and lid
+policy matched at the endpoints; the event query succeeded with no matching
+events, and SleepStudy shows Active across the observation window. The user
+confirmed the ten-second closure and returned to an already logged-in desktop
+without a password prompt. Windows lid-triggered sleep was not demonstrated;
+direct lid notifications remain unmeasured, so this is not a sensor-failure verdict.
+The legacy sleep-diagnostics command reported deprecation and generated
+no report; its status was retained. Full curated evidence is in [FINDINGS.md](FINDINGS.md).
+
+**Approved change and retest (09:47–09:49 UTC):** Dell's BIOS setter returned
+success and fresh readback confirmed `LidSwitch=Enabled`. Only that value changed
+among the 104 captured enumeration/integer attributes. In the same Windows boot,
+direct notifications reported open → closed → open; Kernel-Power 506/507 recorded
+Modern Standby entry and exit with **Reason: Lid**, about 14.9 seconds apart.
+SleepStudy shows Screen Off → Sleep → Active. AC and Windows lid policy stayed
+the same at the captured endpoints, and both subscriptions unregistered normally.
+The modern system-power-report fallback and SleepStudy succeeded. This establishes
+Windows lid recognition and sleep/wake for this brief AC test, not Linux recovery
+or low overnight drain. Next is Windows Restart → Ubuntu and a protected raw/ACPI
+closure before Ubuntu's first suspend; no further Windows closure is needed now.
 
 ## Before leaving Ubuntu
+
+The original handoff instructions below are retained for reproducibility. The
+current machine is already in Windows; the authorized LidSwitch change and retest
+are complete. Continue with the post-change Ubuntu comparison in `FINDINGS.md`.
 
 1. The user authorized publishing the source and curated findings to
    `https://github.com/travishriley/Dell-9310-2in1-PowerDrainFix`. Clone that repository
@@ -62,9 +105,12 @@ are private Ubuntu artifacts, not missing files that Windows must recreate.
 ## One elevated launch, then one physical action
 
 Save Windows work too. Stay beside the laptop and able to reopen/wake it normally.
-Before launching, inspect Control Panel → Power Options → **Choose what closing
-the lid does** and take one screenshot of the current battery and plugged-in
-settings, without changing or applying them. If the applicable action is **Shut
+Before launching, inspect the existing lid-close policy. The agent can read both
+AC and DC values using `powercfg /qh SCHEME_CURRENT SUB_BUTTONS`, including hidden
+settings omitted by ordinary `/query`. If this does not expose the policy clearly,
+inspect Control Panel → Power Options → **Choose what closing the lid does** and
+take one screenshot of the current battery and plugged-in settings, without
+changing or applying them. If the applicable action is **Shut
 down**, stop and report that rather than knowingly shutting down the machine and
 losing the capture. **Hibernate** or **Do nothing** changes what this comparison
 can establish; report that policy before proceeding. Hibernation may need an
@@ -126,8 +172,9 @@ restrictions. There is no execution-policy option in the collector itself.
 - Preparation has a 75-second budget. Observation uses a **90-second UTC wall-clock
   deadline from readiness**, not 90 seconds of awake polling. There is no keypress
   prompt. After that deadline, collection has a further **180-second budget**.
-- Each before/after context child is limited to 30 seconds; each `powercfg /a` or
-  `/query` to 15 seconds; event extraction to 20 seconds; each report to 45 seconds.
+- Each before/after context child is limited to 30 seconds; each `powercfg /a`,
+  `/query`, or `/qh` to 15 seconds; event extraction to 20 seconds; each report
+  (including the conditional fallback) to 45 seconds.
   Commands also respect the remaining phase budget. An overdue owned process is
   terminated; commands with no budget left are recorded as skipped. Timeouts,
   nonzero exits, unsupported-command messages, missing/empty reports and partial
@@ -161,8 +208,9 @@ restrictions. There is no execution-policy option in the collector itself.
 | `before-context.stdout.txt`, `after-context.stdout.txt` | JSON with OS caption/version/build, last boot time, BIOS version/date and AC/battery context. BIOS serials are not selected. Inspect `Errors` even if the child exited normally; killed children may leave no usable JSON. Battery fraction is 0–1 when known; charge/status flags and unknown values must be respected, and -1 remaining seconds means unknown. |
 | `before-sleep-states.stdout.txt`, `after-sleep-states.stdout.txt` | `powercfg /a`: advertised sleep states and availability reasons. |
 | `before-policy.stdout.txt`, `after-policy.stdout.txt` | Full `powercfg /query` for the active scheme, including the displayed AC/DC values. Different output is flagged as a possible policy confounder, never repaired. |
+| `before-lid-policy.stdout.txt`, `after-lid-policy.stdout.txt` | `powercfg /qh SCHEME_CURRENT SUB_BUTTONS`, including hidden AC/DC lid-close and lid-open actions. Different output is separately flagged as `LidPolicyQueryChange`; unknown/failed queries stay inconclusive. |
 | `events.xml`, `event-messages.txt`, `events.stdout.txt` | System Kernel-Power and Power-Troubleshooter events, raw XML plus rendered messages, with query status/count. All IDs are eligible. Interval is readiness minus 15 seconds through actual observation end plus 15 seconds; the collector waits for the end margin before querying if time permits. A killed query can leave truncated XML/messages. |
-| `system-sleep-diagnostics.html`, `sleepstudy.html` | Generated by `powercfg /systemsleepdiagnostics` and `/sleepstudy`. May be unsupported, incomplete or absent; consult statuses and accompanying stdout/stderr, not file existence alone. |
+| `system-sleep-diagnostics.html`, `system-power-report.html`, `sleepstudy.html` | The collector requests `/systemsleepdiagnostics`, falls back to `/systempowerreport` if the legacy command does not produce a successful nonempty report, then requests `/sleepstudy`. The fallback retains separate logs and the legacy failure status; all share the existing collection deadline. Reports may be unsupported, incomplete or absent; inspect command statuses. The fallback was added after the first capture and successfully exercised in the approved post-change retest. |
 | `*.stderr.txt`, other `*.stdout.txt` | Command diagnostics, including localized unsupported/error text. Empty stderr alone does not prove success. |
 
 **Privacy:** snapshots deliberately avoid requesting serial numbers, but native
@@ -183,7 +231,7 @@ automated, and raw reports should not be committed to Git.
   between Modern Standby and traditional sleep; a generic sleep event is not
   direct lid telemetry. Competing idle sleep, manual wake or another power action
   makes interpretation less certain.
-- If `/query` does not expose the lid action clearly, retain a screenshot of the
+- If neither `/query` nor the explicit hidden lid-policy query exposes the action clearly, retain a screenshot of the
   existing Control Panel **“Choose what closing the lid does”** page showing both
   battery and plugged-in actions, without editing/applying anything. **“Do nothing”
   or “Hibernate” means absence of sleep is not a failed sensor test.** Do not adjust
@@ -207,3 +255,47 @@ no suspend since restart”** if true. The main agent will verify the boot and a
 the existing protected raw/ACPI comparison before the first Ubuntu suspend. Windows
 success would weaken permanent sensor-failure explanations, not establish a power-
 drain fix or identify a particular Linux driver.
+
+## Optional direct Windows lid notifications
+
+`windows_lid_notifications.ps1` is a separate unprivileged listener for the Windows
+lid-state notification and AC/DC-source notification. It uses the documented
+[PowerSettingRegisterNotification API](https://learn.microsoft.com/en-us/windows/win32/api/powersetting/nf-powersetting-powersettingregisternotification).
+The [lid GUID documentation](https://learn.microsoft.com/en-us/windows/win32/power/power-setting-guids)
+defines 0 as closed and 1 as open; an initial notification reports current Windows
+state, not a physical transition. No lid callback means unknown state. These are
+Windows notifications, not direct EC or raw ACPI reads and not sleep measurements.
+
+The listener writes `notifications.jsonl` incrementally and records registration,
+deadline, cleanup, and initial/last known values in `manifest.json`. It uses a new
+private directory under LocalApplicationData/Dell9310-LidNotifications by default;
+`-OutputRoot` selects another absolute local root under the same privacy guidance
+as the report collector. The callback and its storage stay rooted until that
+PowerShell process exits, even after unregistration, to avoid dangling native
+callbacks. Prefer a fresh PowerShell process for each run.
+
+The default observation is 90 seconds of UTC wall time (`-Seconds` permits 5–300).
+It prints readiness only after both subscriptions succeed and unregisters them
+in cleanup. Read `State`, registration errors and the JSONL, not just the ENDED
+notice. Existing Windows lid policy remains active; the listener neither requests
+nor inhibits sleep, and cannot execute while the machine is asleep. No automatic
+pass/fail verdict is made. A physical run still requires saved work and a
+coordinated ten-second close/reopen after readiness. The current post-change
+Windows test is complete; do not repeat it without a new measurement question.
+
+For a passive startup check with the lid left open:
+
+```powershell
+powershell.exe -NoLogo -NoProfile -File .\windows_lid_notifications.ps1 -BaselineOnly -Seconds 5
+```
+
+For synthetic tests that do not register real notifications or request a closure:
+
+```powershell
+powershell.exe -NoLogo -NoProfile -File .\test_windows_lid_notifications.ps1
+```
+
+The September 26 passive check received initial open/AC values and unregistered
+successfully. The synthetic parser/interop/decoder tests passed. The subsequent
+approved post-change trial captured open/closed/open and successful cleanup,
+correlated with Modern Standby entry/exit with reason Lid in the report collector.

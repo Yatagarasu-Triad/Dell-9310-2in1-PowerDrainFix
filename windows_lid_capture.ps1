@@ -56,7 +56,7 @@ $manifest = [ordered]@{
     EventIntervalEndUtc = $null
     ObservationSeconds = 90
     EventMarginSeconds = 15
-    Confounders = [ordered]@{ AcChange = 'unknown'; PolicyQueryChange = 'unknown' }
+    Confounders = [ordered]@{ AcChange = 'unknown'; PolicyQueryChange = 'unknown'; LidPolicyQueryChange = 'unknown' }
     Interpretation = 'Unclassified: correlate policy, physical closure and event reasons; missing events are not a lid verdict.'
     Privacy = 'Private local evidence, not anonymized. Reports/events may include identifiers, paths and earlier activity. Review before sharing.'
     Error = $null
@@ -86,7 +86,7 @@ function Capture-Command([string]$Name, [string]$Executable, [string]$Arguments,
     $process = $null
     try {
         if ($started -lt $deadline) {
-            $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WorkingDirectory $run -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $run $record.Stdout) -RedirectStandardError (Join-Path $run $record.Stderr)
+            $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WorkingDirectory $run -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run $record.Stdout) -RedirectStandardError (Join-Path $run $record.Stderr)
             $null = $process.Handle
             while (-not $process.HasExited -and [datetime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 200 }
             if ($process.HasExited) {
@@ -121,6 +121,13 @@ function Capture-Command([string]$Name, [string]$Executable, [string]$Arguments,
         Save-Json -Value @($commands.ToArray()) -Name 'commands.json'
     }
     if ($record.Status -ne 'ok') { Write-Warning "$Name : $($record.Status). Other evidence will still be collected." }
+}
+function Capture-SleepDiagnostics([datetime]$PhaseDeadline) {
+    Capture-Command 'systemsleepdiagnostics' $powercfg ('/systemsleepdiagnostics /output "' + (Join-Path $run 'system-sleep-diagnostics.html') + '"') 45 $PhaseDeadline 'system-sleep-diagnostics.html'
+    $legacyReport = $commands[$commands.Count - 1]
+    if ($legacyReport.Status -ne 'ok' -or $legacyReport.ReportState -ne 'present') {
+        Capture-Command 'systempowerreport' $powercfg ('/systempowerreport /output "' + (Join-Path $run 'system-power-report.html') + '"') 45 $PhaseDeadline 'system-power-report.html'
+    }
 }
 
 # Small child captures keep CIM/event queries bounded too. Only built-in commands
@@ -189,6 +196,7 @@ try {
     Capture-Command 'before-context' $windowsPowerShell $snapshotArguments 30 $setupDeadline
     Capture-Command 'before-sleep-states' $powercfg '/a' 15 $setupDeadline
     Capture-Command 'before-policy' $powercfg '/query' 15 $setupDeadline
+    Capture-Command 'before-lid-policy' $powercfg '/qh SCHEME_CURRENT SUB_BUTTONS' 15 $setupDeadline
 
     $start = [datetime]::UtcNow
     $deadline = $start.AddSeconds(90)
@@ -214,10 +222,11 @@ try {
     Capture-Command 'after-context' $windowsPowerShell $snapshotArguments 30 $collectionDeadline
     Capture-Command 'after-sleep-states' $powercfg '/a' 15 $collectionDeadline
     Capture-Command 'after-policy' $powercfg '/query' 15 $collectionDeadline
+    Capture-Command 'after-lid-policy' $powercfg '/qh SCHEME_CURRENT SUB_BUTTONS' 15 $collectionDeadline
     if ($to -lt $collectionDeadline) { Wait-Until $to }
     $eventInvocation = '& {' + $eventsCode.ToString() + "} '$($from.ToString('o'))' '$($to.ToString('o'))'"
     Capture-Command 'events' $windowsPowerShell (Encode-Command $eventInvocation) 20 $collectionDeadline
-    Capture-Command 'systemsleepdiagnostics' $powercfg ('/systemsleepdiagnostics /output "' + (Join-Path $run 'system-sleep-diagnostics.html') + '"') 45 $collectionDeadline 'system-sleep-diagnostics.html'
+    Capture-SleepDiagnostics $collectionDeadline
     Capture-Command 'sleepstudy' $powercfg ('/sleepstudy /output "' + (Join-Path $run 'sleepstudy.html') + '"') 45 $collectionDeadline 'sleepstudy.html'
 
     # Endpoint checks flag confounders, not sensor outcomes; transient changes can be missed.
@@ -236,6 +245,12 @@ try {
         $afterHash = (Get-FileHash -LiteralPath (Join-Path $run 'after-policy.stdout.txt') -Algorithm SHA256).Hash
         if ($beforeHash -ne $afterHash) { $manifest.Confounders.PolicyQueryChange = 'changed_query_output_review_as_confounder' }
         else { $manifest.Confounders.PolicyQueryChange = 'same_query_output_at_endpoints_only' }
+    }
+    if (@($commands | Where-Object { $_.Name -in @('before-lid-policy', 'after-lid-policy') -and $_.Status -eq 'ok' }).Count -eq 2) {
+        $beforeLidHash = (Get-FileHash -LiteralPath (Join-Path $run 'before-lid-policy.stdout.txt') -Algorithm SHA256).Hash
+        $afterLidHash = (Get-FileHash -LiteralPath (Join-Path $run 'after-lid-policy.stdout.txt') -Algorithm SHA256).Hash
+        if ($beforeLidHash -ne $afterLidHash) { $manifest.Confounders.LidPolicyQueryChange = 'changed_query_output_review_as_confounder' }
+        else { $manifest.Confounders.LidPolicyQueryChange = 'same_query_output_at_endpoints_only' }
     }
     $manifest.State = 'collection_finished_review_command_status_and_snapshot_errors'
 } catch {

@@ -1,5 +1,6 @@
 # Local diagnostic evidence may contain machine identifiers and journal data.
 runs/
+screenshots/
 .raw-session-*/
 .tools/
 __pycache__/

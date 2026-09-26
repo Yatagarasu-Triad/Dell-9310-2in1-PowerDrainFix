@@ -3,8 +3,16 @@
 **Status:** the direct Ubuntu reboot baseline is complete. After an interrupted
 first attempt, a replacement captured 174 ACPI/raw/logind samples, all open, during
 a user-confirmed ten-second closure before the boot's first suspend, on battery.
-Next is unchanged BIOS photos and the [Windows comparison](WINDOWS_TEST.md); no
-Windows comparison or controlled suspend has run. Read [FINDINGS.md](FINDINGS.md)
+On September 26, BIOS photos were reviewed and the first
+[Windows capture](WINDOWS_TEST.md) completed with no recorded sleep events;
+the user confirmed the ten-second closure and an already logged-in desktop on
+reopening. An elevated Dell BIOS query found **LidSwitch Disabled**. With user
+approval, only LidSwitch was enabled; the same-boot retest captured open/closed/open
+and Modern Standby entry/exit with reason Lid. PowerOnLidOpen remains Disabled.
+Next is Windows Restart → Ubuntu and the protected pre-first-suspend raw/ACPI
+capture. **This changes the original comparison: Ubuntu now follows an intentional
+LidSwitch change as well as Windows.** No controlled Linux suspend has run.
+Read [FINDINGS.md](FINDINGS.md)
 for evidence. This document does not automatically initiate any power action.
 
 Two confirmed ten-second lid closures established a failure of OS-visible lid

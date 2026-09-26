@@ -1,17 +1,25 @@
-# Investigation findings — 2026-09-22
+# Investigation findings — updated 2026-09-26
 
 ## Status
 
-**Power-drain root cause and permanent fix are not yet established.** The current
-investigation has reproduced an OS-visible lid-reporting failure upstream of
-logind: the user confirmed ten-second physical closures in two protected tests,
-but raw input remained open; in the second, ACPI `_LID` also remained open.
-A third completed and user-confirmed closure after reboot reproduced the failure
-before this Ubuntu boot's first suspend, on battery power. Do not install a custom
-lid handler until its input signal is reliable.
+**Windows lid recognition and lid-triggered sleep/wake are restored in the retest.**
+With explicit user approval, BIOS `LidSwitch` was changed from `Disabled` to
+`Enabled`. The setter returned success and fresh readback confirmed Enabled;
+only that attribute changed among 104 captured enumeration/integer attributes.
+`PowerOnLidOpen` remains Disabled, Fastboot Minimal, and CStatesCtrl Enabled.
 
-No storage, firmware, boot, kernel-module, desktop/logind, PAM, filesystem, or
-hibernation settings have been changed. No new suspend experiment has been executed.
+Before the change, a confirmed Windows closure produced no sleep events. After
+the change, in the same Windows boot, direct notifications recorded
+**open → closed → open**, and Kernel-Power events recorded Modern Standby entry
+and exit with **Reason: Lid**. SleepStudy independently shows Screen Off → Sleep
+→ Active. The observed standby interval was about 14.9 seconds on AC.
+
+**Linux lid reporting and overnight drain are not yet revalidated.** Earlier
+Ubuntu tests found ACPI/raw/logind stuck open, including before the first suspend
+after reboot. The next step is Windows Restart → Ubuntu, then the protected
+ACPI/raw test before Ubuntu's first suspend. Restored Windows sleep entry is not
+proof of sustained PC10/S0ix or a complete power-drain fix. No other settings,
+firmware image, storage, boot configuration, drivers, or power policies were changed.
 
 ## Confirmed
 
@@ -263,12 +271,19 @@ the EC's underlying physical sensing implementation remains unverified.
 
 ## Likely
 
+- The disabled BIOS LidSwitch explains the current Windows lid failure: enabling
+  only that attribute restored lid-triggered sleep/wake without a reboot. It is
+  also the leading explanation for the earlier Linux stuck-open state, pending
+  the corresponding Linux retest. Historical setting provenance remains unknown.
 - The lid signal/reporting issue is upstream of logind: confirmed physical
   closures remain invisible to raw input and ACPI, including the completed
   pre-first-suspend observation after reboot.
 - The original good/bad suspend-path distinction remains important, but identifying
   an interval as “normal lid-triggered” now requires raw-event and journal evidence;
   a manual or idle-timer suspend should not be mislabeled.
+- The initial Windows failure contradicted a Linux-only explanation. Windows
+  notifications and sleep now work after the approved firmware-setting change;
+  Linux reporting must be checked with that same Enabled setting.
 
 ## Possible
 
@@ -277,6 +292,9 @@ the EC's underlying physical sensing implementation remains unverified.
 - EC/firmware state retained across ordinary reboot could still matter. A suspend
   in the current Ubuntu boot is not necessary: pre-first-suspend failure is now
   reproduced. An ordinary reboot is not a guaranteed EC reset.
+- Any remaining Linux-specific firmware/EC/driver behavior becomes relevant only
+  if the Linux retest still fails with LidSwitch Enabled. The successful Windows
+  cycle argues against a permanently failed lid sensor, not all intermittent faults.
 - A notification failure alone is insufficient to explain the ACPI-aware result,
   because a direct `_LID` query also continued to report open.
 - The Intel HID late-registration/resume warning and convertible/sensor state may
@@ -301,6 +319,228 @@ the EC's underlying physical sensing implementation remains unverified.
 
 ## BIOS and cross-OS comparison preparation
 
+### Windows preflight and supplied BIOS photos — 2026-09-26
+
+The existing Windows checkout is now available on the laptop. Four supplied
+photos in ignored `screenshots/` were reviewed locally; the overview images
+contain machine identifiers and must remain private. Only the relevant settings
+are transcribed here:
+
+| Photo | Visible evidence |
+| --- | --- |
+| `1000020428.jpg` | XPS 13 9310 2-in-1; BIOS **2.36.0**; battery 100%, Idle, firmware health label Good; 45 W adapter. Manufacture/ownership dates are not BIOS release dates. |
+| `1000020429.jpg` | Continuation of hardware overview; no lid or sleep settings. |
+| `1000020434.jpg` | All CPU cores selected; Intel SpeedStep **ON**; Enable C-State Control **ON**. |
+| `1000020436.jpg` | Firmware Fastboot **Minimal**; extended BIOS POST time 0 seconds; dock warning messages ON. |
+
+All four photos show zero pending changes at capture time. This is not proof of
+the full BIOS-session history. **Lid Switch, Block Sleep, and wake-policy controls
+are not pictured**; their values were subsequently read through Dell WMI below.
+No extra BIOS visit was needed
+before the Windows baseline. Fastboot Minimal is a possible initialization
+variable because its displayed help describes skipping some initialization; it
+is not an established cause, and no setting was changed. Enabled C-states rule
+out that visible toggle being off, not firmware/runtime power-state failures.
+The firmware's qualitative battery-health label does not supersede the Linux
+full/design capacity measurements.
+
+Read-only Windows preflight found:
+
+- Windows 11 Pro, build **26200**, BIOS **2.36.0** (release date 2025-11-26).
+- Last boot **2026-09-26 09:04:16.500 UTC** (03:04:16.500 MDT).
+- AC online and battery 100% at preflight, unlike the battery-only Ubuntu baseline.
+- `powercfg /a`: S0 Low Power Idle, Network Connected; Hibernate and Fast Startup
+  available; S3 unavailable. These are advertised capabilities, not residency data.
+- Active Dell scheme: `powercfg /qh SCHEME_CURRENT SUB_BUTTONS` exposes hidden
+  **Lid close action = Sleep (1) on both AC and DC**. Lid open action is Turn on
+  the display (1) on both. No Control Panel change is needed for this comparison.
+- Idle sleep timeout is five hours on AC and three minutes on DC. Keep AC/devices
+  unchanged during capture; a coincident idle action remains a timing confounder.
+- The successful System Kernel-Power/Power-Troubleshooter query since boot returned
+  two battery-count events (521), with no sleep/resume event at preflight time.
+  This does not replace the user's physical-action and boot-history report.
+- The terminal is not an administrator. WMI initially failed inside the sandbox;
+  the same read-only queries succeeded outside it. The collector still requires
+  a Windows Administrator token for its reports.
+
+### First Windows capture — confirmed closure, no recorded sleep
+
+Private run: `runs/windows/lid-20260926T091933Z-8ec5dbe66ca04e00b85795762cb66c28/`.
+The collector ran under one UAC administrator launch and exited normally. The
+agent relayed readiness and the ten-second close/reopen instruction, then the
+completion notice. No sleep request, inhibitor, wake timer, or policy change was
+issued by the agent or collector.
+
+- Observation: **09:19:35.981–09:21:06.117 UTC** (03:19:35.981–03:21:06.117 MDT).
+  Collection finished at **09:21:24.350 UTC**.
+- Both context snapshots succeeded with empty `Errors`; OS, BIOS, and boot time
+  matched. AC remained online at both endpoints, battery 100%.
+- Full active-policy and hidden button/lid-policy outputs matched before/after.
+  This does not exclude transient changes between endpoints.
+- The event query succeeded and returned **zero matching events** in
+  09:19:20.981–09:21:21.117 UTC. This was not a timeout or event-log permission error.
+- SleepStudy was generated successfully. Its embedded scenario data shows an
+  **Active** interval from 09:04:44 through 09:21:22 UTC spanning the observation,
+  with no recorded Screen Off/Sleep interval for the trial. The report contains
+  earlier history too; those earlier sessions are not this physical test.
+- Ten commands completed normally. `/systemsleepdiagnostics` exited zero but
+  produced only a deprecation message directing callers to `/systempowerreport`;
+  its absent report was correctly flagged `report_missing_or_empty`. PowerShell
+  child stderr contains module-loading progress in CLIXML, not a snapshot error.
+- The collector now includes a conditional `/systempowerreport` fallback, retaining
+  the legacy status and using a separate log/report within the original deadline.
+  This was added after the run and validated in isolation; it was not retroactively
+  run or inserted into this capture. Hidden lid-policy snapshots and comparisons
+  were added before the run and were exercised successfully on the laptop.
+
+The user subsequently confirmed closing the lid for **ten seconds** after the
+readiness instruction. Reopening showed the already logged-in Windows desktop,
+without a password prompt or logout/login behavior. That visible behavior alone
+is not a sleep measurement; the stronger evidence is the successful empty event
+query and SleepStudy Active interval with unchanged Sleep lid policy.
+
+**Interpretation:** this trial did not demonstrate Windows lid-triggered sleep.
+It does not establish that Windows received no lid notification, or prove a
+defective sensor. The historical recollection that Windows worked is not
+reproduced in this trial. Do not repeat the same report-only closure without a
+new measurement. No overnight drain or sustained S0ix measurement was made.
+
+Read-only follow-up after confirmation found:
+
+- ACPI Lid (`PNP0C0D`) is present, status OK, PnP problem code 0; its reported
+  driver version is 10.0.26100.1150. Successful enumeration is not proof that
+  physical transitions reach Windows.
+- Intel HID Event Filter (`INTC1051`, 2.2.2.9), Intel Integrated Sensor Solution
+  (3.1.0.4477), and the enumerated HID Sensor Collection V2 devices also report
+  OK with problem code 0. These statuses do not establish correct runtime input.
+- A later successful event query covering the original interval still returns
+  no Kernel-Power/Power-Troubleshooter events, reducing concern about delayed
+  event delivery. AC/DC lid-close actions remain Sleep.
+- The read-only request-override query lists no overrides. The live `/requests`
+  query requires an administrator token and was unavailable in this follow-up;
+  there is no supported claim that all power requests are absent.
+- A later open-lid context check reports laptop mode (`SM_CONVERTIBLESLATEMODE=1`),
+  undocked (`SM_SYSTEMDOCKED=0`), one desktop monitor, and a local session. WMI
+  reports one active internal display. These are post-trial observations, not
+  measurements of tablet/dock state during the closure. Metric meanings follow
+  [Microsoft's GetSystemMetrics documentation](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getsystemmetrics).
+
+### Dell BIOS WMI: lid switch disabled
+
+Private follow-up: `runs/windows/context-20260926T093247Z-51f0a84b13c14bf5ba78d716625765c8/`,
+collected at 09:32:48–09:32:54 UTC under a grouped administrator launch. The earlier
+nonadministrator query returned Access denied; the elevated query succeeded.
+Only CIM reads and power-report queries were used; no BIOS methods were invoked.
+
+Before the approved change, at 09:32 UTC,
+`root\dcim\sysman\biosattributes:EnumerationAttribute` returned these values:
+
+| Attribute | Pre-change value |
+| --- | --- |
+| **LidSwitch** | **Disabled** |
+| PowerOnLidOpen | Disabled |
+| BlockSleep | Disabled |
+| CStatesCtrl | Enabled |
+| Fastboot | Minimal |
+| WakeOnDock, WakeOnAc, WakeOnLan, AutoOn | Disabled |
+
+Dell documents `LidSwitch` as the lid-function enable/disable control: when
+enabled the OS determines lid-close display behavior, while disabling it prevents
+closure from affecting the display. The separate `PowerOnLidOpen` attribute
+controls starting from the powered-off state. The current machine exposes both
+attributes, resolving the ambiguity in the older model-specific service manual.
+Sources: [Dell LidSwitch reference](https://www.dell.com/support/manuals/en-us/command-configure/dcc_cli_4.2/--lidswitch?guid=guid-bd4e530d-a232-4d34-8707-6484deaa5877&lang=en-us),
+[Dell PowerOnLidOpen reference](https://www.dell.com/support/manuals/en-tt/command-powershell-provider/dellcommandpowershellprovider_rg_2.3/powermanagement?guid=guid-18b6dc2e-6af2-4537-9cc2-4abc5bf94e6c&lang=en-us).
+
+**Inference:** the disabled lid-function control is now the leading explanation
+for current ignored closures, and is more actionable than assuming a faulty
+sensor or Linux driver. It does not establish when the setting changed, explain
+all historical S0ix measurements, or prove that enabling it fixes overnight drain.
+Fastboot is not the next variable to change.
+
+All four follow-up commands completed successfully, including a nonempty
+`system-power-report.html`. `/requests` showed a SYSTEM request from Zed
+(Agent thread in progress) and an EXECUTION request from the Windows Update
+worker; DISPLAY and AWAYMODE were empty. `/requestsoverride` showed no overrides.
+These are post-trial snapshots, not evidence of their exact state during closure.
+System requests concern inactivity sleep; Microsoft documents that power requests
+are normally terminated at user-initiated sleep entry. Do not conclude that the
+Zed request caused the missing lid response or clear it as an unmeasured fix.
+Source: [Microsoft PowerSetRequest](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-powersetrequest).
+
+### Direct Windows notification helper — passive baseline only
+
+`windows_lid_notifications.ps1` was prepared for follow-up while the firmware
+query was pending. A nonadministrator, five-second **open-lid-only** validation
+completed at 09:35:35 UTC in
+`runs/windows/notifications-20260926T093529Z-4d0d085f4739401aa5995f7137c64a45/`.
+Both lid and AC-source registrations/unregistrations returned zero. Initial
+notifications reported lid **open** and power source **AC**; no further changes
+were observed while the lid stayed open. This validates callback delivery and
+cleanup, not a physical closure or sensor correctness. At that point, a second
+physical trial was deferred until the user authorized the LidSwitch change.
+
+PowerShell parsing, C# compilation, native layout checks, 13 synthetic payload
+cases, managed callback lifetime/worker-thread queue checks, and idempotent
+unregistered cleanup pass in `test_windows_lid_notifications.ps1`. The listener
+was later used in the authorized post-change retest below. It requests
+no power action and keeps initial/absent notifications distinct from transitions.
+
+### Authorized LidSwitch enable and successful Windows retest
+
+User authorization: **"Yes, enable LidSwitch then retest"**. The one-time local
+helper `.tools/enable_lidswitch_retest.ps1` issued exactly one
+`BIOSAttributeInterface.SetAttribute` call, targeting only `LidSwitch=Enabled`.
+It used Dell's native WMI interface, with local method-schema checks, saved
+before/after snapshots, and no-password authentication. No packages, firmware
+flash, BIOS defaults/reset, or reboot were involved.
+
+Private parent run:
+`runs/windows/enable-lidswitch-20260926T094727Z-2204ea965d804fa3896260affde06906/`.
+Its `change-and-retest.json` records the authorization, successful `SetStatus=0`,
+`PreviousValue=Disabled`, `VerifiedValue=Enabled`, no other enumeration/integer
+changes, and both recorder exits as zero. All 98 enumeration and six integer
+values were compared. String/security/boot-order classes were not part of that
+comparison, and no writes targeting them were issued.
+
+The existing report collector and direct notification listener then ran together
+under the same administrator launch. Their files are in the parent's `reports/`
+and `notifications/` children. Both were ready by **09:47:39.217 UTC**; the shared
+physical window ended **09:49:08.413 UTC**. Collection ended **09:49:25.279 UTC**.
+
+| Evidence | UTC time / result |
+| --- | --- |
+| Initial lid notification | 09:47:39.129 — open |
+| Lid-close notification | 09:47:54.171 — closed |
+| Kernel-Power 506 | 09:47:55.063 — entering Modern Standby, **Reason: Lid** |
+| Lid-open notification | 09:48:09.577 — open |
+| Kernel-Power 507 | 09:48:09.951 — exiting Modern Standby, **Reason: Lid** |
+| SleepStudy | Screen Off 09:47:55–09:47:56; Sleep 09:47:56–09:48:09; then Active; exit reason Lid |
+
+The callback close/open interval was about **15.4 seconds**, and the Modern
+Standby entry/exit interval about **14.9 seconds**. These are measured receipt/event
+intervals, not an assumed exact ten-second physical duration. Five power events
+were captured in total; the others were session transitions. No invalid/unknown
+notification payloads occurred. Both native subscriptions unregistered successfully.
+
+OS build 26200, BIOS 2.36.0, and last boot 09:04:16.500 UTC matched before/after;
+the change therefore took effect for this trial without restarting. Context
+snapshots had no errors. AC remained Online, battery 100%, and full/lid power-policy
+outputs matched at both endpoints; the listener reported AC with no change event.
+The old `/systemsleepdiagnostics` command again reported deprecation/no file;
+the new `/systempowerreport` fallback and SleepStudy both generated nonempty
+reports successfully. No additional sleep command or inhibitor was used.
+
+**Conclusion:** the current Windows lid-recognition and lid-triggered Modern
+Standby failure is resolved by the approved single-setting change in this trial.
+The user's description of the reopening experience is still pending, but OS
+entry/exit reasons and direct state transitions are recorded. This short AC trial
+does not establish sustained deep residency, battery savings, reboot persistence,
+or restored Linux input. SleepStudy marks these short Screen Off/Sleep segments
+without detailed trace data, so no S0ix-residency percentage is claimed.
+
+### Earlier preparation (Ubuntu handoff, historical)
+
 - The user recalls normal lid behavior in Windows and failures only in Linux.
   No fresh Windows or Pop!_OS comparison has been run; this remains reported history.
 - Dell's model-specific service manual (Tables 10–13, pages 44–46) documents
@@ -318,14 +558,31 @@ the EC's underlying physical sensing implementation remains unverified.
 
 ## Next experiment
 
-**The direct Ubuntu reboot baseline is complete and the reporting fault persists.**
-No additional same-boot lid closure or deliberate Linux suspend is needed now.
-Next: unchanged BIOS photographs, then Windows, then Windows **Restart → Ubuntu**.
-Do not restart or shut down automatically while work may be unsaved.
+**The authorized LidSwitch enable and Windows retest are complete.** The earlier
+Ubuntu fault was measured before this change. A post-change Ubuntu baseline is
+next; no additional Windows closure is needed.
 
-Hypothesis: Windows recognizes the same physical closure, or initializes firmware
-state differently enough to change subsequent Ubuntu reporting. This distinguishes
-OS-dependent behavior from a permanently failed sensor without assuming either.
+1. Save work and use Windows **Restart**, selecting Ubuntu through the existing
+   boot selector. Keep the lid open and return before any Ubuntu suspend. No
+   automatic reboot, hybrid shutdown, extra BIOS change, or EC reset is requested.
+2. Verify the new Ubuntu boot, BIOS/power context, and absence of prior suspend.
+   Run the existing protected `python3 -B raw_lid_session.py --acpi-lid` capture;
+   after readiness, coordinate one ten-second closure/reopen. It should now
+   register ACPI/raw/logind transitions if the BIOS setting explains Linux too.
+3. If raw reporting works, proceed to controlled PC10/S0ix and drain measurements
+   before claiming an overnight fix. If it still fails, preserve the boot's
+   evidence and investigate the remaining Linux path with the Enabled setting.
+
+**Comparison caveat:** this Ubuntu boot follows both Windows and an intentional
+LidSwitch change. Improvement cannot be attributed solely to Windows initializing
+firmware. Record the changed setting in every subsequent result.
+
+Keep `LidSwitch=Enabled`. Its saved rollback value is Disabled, but do not undo
+the successful change automatically. `PowerOnLidOpen` stays Disabled, Fastboot
+Minimal, and other settings remain as captured. The user's approval covered this
+single-setting change and retest, not unrelated firmware changes.
+
+The original handoff sequence is retained for context:
 
 1. The user authorized publishing the source and curated findings to the public
    GitHub repository for cloning in Windows. Use that checkout for the collector;
@@ -343,8 +600,9 @@ OS-dependent behavior from a permanently failed sensor without assuming either.
    90-second closure window, then collects event evidence and bounded power reports.
    It changes no power policy, requests no sleep itself, and makes no automatic
    lid pass/fail claim. Unlike the Linux test, it does not inhibit existing lid
-   actions. Its Windows execution remains unverified; PowerShell is unavailable
-   on this Linux host. Reports may contain identifiers and prior-session activity.
+   actions. Windows execution was initially unverified on Linux; September 26
+   validation and the first Windows capture are recorded above. Reports may
+   contain identifiers and prior-session activity.
 5. Transfer reviewed evidence through the agreed location. Use Windows **Restart**,
    not hybrid shutdown, to boot Ubuntu; capture ACPI/raw/logind before the first
    Ubuntu suspend again. Keep power/peripherals fixed where possible and record
@@ -373,8 +631,13 @@ approval for any configuration changes, especially with this ZFS root.
   corrected desktop readiness flow exercised on this host.
 - Replacement live capture completed with all 174 incremental samples matching
   the final JSON, correct end notification, and verified ownership/inhibitor cleanup.
-- Windows collector reviewed on Linux only; no PowerShell parser/runtime or Windows
-  hardware validation was possible locally (`pwsh` unavailable).
+- Windows PowerShell 5.1.26100.7920 parser and 14 isolated checks
+  passed on September 26. The first elevated Windows capture completed; see the
+  missing legacy report and lack of direct lid telemetry above. The runner
+  checks cover success, nonzero exit, timeout, skipped deadline, and report
+  presence/empty/missing/partial handling; six further cases check legacy-report
+  fallback decisions and preservation of an expired deadline. Raw synthetic
+  artifacts remain ignored.
 - No real A/B/C suspend or RTC wake test has run in this session.
 - Zed's terminal sandbox cannot start because its running executable was deleted;
   explicit unsandboxed approvals were needed even for read-only commands.

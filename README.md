@@ -8,8 +8,13 @@ platform residency; a successful `systemctl suspend` is not the success criterio
 The coordinated plan and model-specific BIOS photo checklist are in
 [REBOOT_TEST_PLAN.md](REBOOT_TEST_PLAN.md). **The direct Ubuntu reboot baseline is
 complete:** a confirmed closure still produced no ACPI/raw lid transition before
-that boot's first suspend. Next is the [Windows comparison](WINDOWS_TEST.md), then
-Windows Restart → Ubuntu. No reboot or firmware changes are automated.
+that boot's first suspend. The [Windows comparison](WINDOWS_TEST.md) also recorded
+no sleep during a confirmed closure despite Sleep lid policy. With user approval,
+**LidSwitch was changed from Disabled to Enabled**. The same-boot Windows retest
+then recorded a full lid cycle and Modern Standby entry/exit with reason Lid.
+Next is Windows Restart → Ubuntu and the protected ACPI/raw comparison before
+Ubuntu's first suspend. Linux reporting and overnight drain remain unverified
+after the change. See [FINDINGS.md](FINDINGS.md). No reboot is automated.
 
 ## Windows handoff
 
@@ -26,7 +31,8 @@ one Administrator PowerShell session, the existing lid-policy check, the readine
 and completion messages, and where private results are saved. Take the unchanged
 [BIOS photos](REBOOT_TEST_PLAN.md#2-bios-photos--on-the-next-restart-before-windows)
 on the restart toward Windows. **Do not commit raw Windows reports or BIOS photos**;
-review and transfer those privately. Windows collector execution is not yet verified.
+review and transfer those privately. Windows preflight and PowerShell validation
+are recorded in [FINDINGS.md](FINDINGS.md).
 
 ## Tools
 
@@ -50,8 +56,12 @@ tools. The separate Windows collector requires Administrator Windows PowerShell
 - `windows_lid_capture.ps1`: one elevated Windows capture of context/policy,
   time-correlated power events, and power reports around a 90-second observation.
   Does not change policy, request/inhibit sleep, or infer a lid verdict. Existing
-  Windows lid actions remain active. **Not yet run or parser-validated on Windows**;
+  Windows lid actions remain active. **PowerShell parser and isolated runner checks pass**;
   launch, privacy, and transfer instructions: [WINDOWS_TEST.md](WINDOWS_TEST.md).
+- `windows_lid_notifications.ps1`: unprivileged, bounded Windows lid/AC-source
+  notification listener for follow-up. Passive startup validation and synthetic
+  tests pass; the post-change physical test captured open/closed/open. See the optional
+  follow-up in [WINDOWS_TEST.md](WINDOWS_TEST.md).
 
 ```sh
 # Read-only baseline; unavailable privileged data is recorded as such.
