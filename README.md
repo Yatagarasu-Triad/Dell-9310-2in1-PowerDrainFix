@@ -22,7 +22,7 @@ Clone the public source repository in Windows (raw Linux captures are deliberate
 not published):
 
 ```powershell
-git clone https://github.com/travishriley/Dell-9310-2in1-PowerDrainFix.git
+git clone https://github.com/Yatagarasu-Triad/Dell-9310-2in1-PowerDrainFix.git
 Set-Location .\Dell-9310-2in1-PowerDrainFix
 ```
 
