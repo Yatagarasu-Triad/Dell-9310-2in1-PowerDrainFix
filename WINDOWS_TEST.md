@@ -71,7 +71,7 @@ current machine is already in Windows; the authorized LidSwitch change and retes
 are complete. Continue with the post-change Ubuntu comparison in `FINDINGS.md`.
 
 1. The user authorized publishing the source and curated findings to
-   `https://github.com/travishriley/Dell-9310-2in1-PowerDrainFix`. Clone that repository
+   `https://github.com/Yatagarasu-Triad/Dell-9310-2in1-PowerDrainFix`. Clone that repository
    in Windows; no shared partition or removable-media copy of the script is needed.
    **Raw captures are not published.** Plan a separate private transfer of reviewed
    Windows results and BIOS photos; do not commit them to this public repository.
@@ -93,7 +93,7 @@ are complete. Continue with the post-change Ubuntu comparison in `FINDINGS.md`.
 In a normal PowerShell window, from your preferred parent folder:
 
 ```powershell
-git clone https://github.com/travishriley/Dell-9310-2in1-PowerDrainFix.git
+git clone https://github.com/Yatagarasu-Triad/Dell-9310-2in1-PowerDrainFix.git
 Set-Location .\Dell-9310-2in1-PowerDrainFix
 ```
 
